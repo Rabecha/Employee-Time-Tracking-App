@@ -1,0 +1,155 @@
+const express = require('express');
+const mysql = require('mysql2/promise');
+const path = require('path');
+const app = express();
+
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
+
+// Database configuration
+const dbConfig = {
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || 'password',
+  database: process.env.DB_NAME || 'time_tracking_app'
+};
+
+let db;
+
+// Initialize database connection
+async function initDB() {
+  try {
+    db = await mysql.createConnection(dbConfig);
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS timesheets (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        employee_name VARCHAR(255) NOT NULL,
+        check_in_time DATETIME NOT NULL,
+        check_out_time DATETIME NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Database connected and timesheets table created');
+  } catch (error) {
+    console.error('Database connection failed:', error);
+    // Don't exit the process here so the app can still start for development purposes.
+    // Set `db` to null so routes can respond accordingly.
+    db = null;
+    console.warn('Continuing without database. Routes that require the database will return 503.');
+  }
+}
+
+// Routes
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// GET all time entries
+app.get('/api/timesheets', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database unavailable' });
+  try {
+    const [rows] = await db.execute('SELECT * FROM timesheets ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching time entries:', error);
+    res.status(500).json({ error: 'Failed to fetch time entries' });
+  }
+});
+
+// POST new time entry
+app.post('/api/timesheets', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database unavailable' });
+  const { employee_name, check_in_time, check_out_time } = req.body;
+  
+  if (!employee_name || !check_in_time || !check_out_time) {
+    return res.status(400).json({ error: 'Employee name, check-in time, and check-out time are required' });
+  }
+
+  try {
+    const [result] = await db.execute(
+      'INSERT INTO timesheets (employee_name, check_in_time, check_out_time) VALUES (?, ?, ?)',
+      [employee_name, check_in_time, check_out_time]
+    );
+    res.status(201).json({ 
+      id: result.insertId, 
+      employee_name, 
+      check_in_time,
+      check_out_time,
+      message: 'Time entry logged successfully' 
+    });
+  } catch (error) {
+    console.error('Error creating time entry:', error);
+    res.status(500).json({ error: 'Failed to create time entry' });
+  }
+});
+
+// PUT update time entry
+app.put('/api/timesheets/:id', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database unavailable' });
+  const { id } = req.params;
+  const { employee_name, check_in_time, check_out_time } = req.body;
+
+  if (!employee_name || !check_in_time || !check_out_time) {
+    return res.status(400).json({ error: 'Employee name, check-in time, and check-out time are required' });
+  }
+
+  try {
+    const [result] = await db.execute(
+      'UPDATE timesheets SET employee_name = ?, check_in_time = ?, check_out_time = ? WHERE id = ?',
+      [employee_name, check_in_time, check_out_time, id]
+    );
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Time entry not found' });
+    }
+    
+    res.json({ message: 'Time entry updated successfully' });
+  } catch (error) {
+    console.error('Error updating time entry:', error);
+    res.status(500).json({ error: 'Failed to update time entry' });
+  }
+});
+
+// DELETE time entry
+app.delete('/api/timesheets/:id', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database unavailable' });
+  const { id } = req.params;
+
+  try {
+    const [result] = await db.execute('DELETE FROM timesheets WHERE id = ?', [id]);
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Time entry not found' });
+    }
+    
+    res.json({ message: 'Time entry deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting time entry:', error);
+    res.status(500).json({ error: 'Failed to delete time entry' });
+  }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+const PORT = process.env.PORT || 3000;
+
+async function startServer() {
+  await initDB();
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+// export for tests
+module.exports = { app, startServer };
+
+// only start when run directly
+if (require.main === module) {
+  startServer();
+}

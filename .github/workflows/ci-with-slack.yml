@@ -1,0 +1,163 @@
+name: CI/CD Pipeline with Slack Notifications
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: time_tracking_app
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run tests
+      id: test
+      run: npm test 2>&1 | tee test-output.log
+      env:
+        DB_HOST: localhost
+        DB_USER: root
+        DB_PASSWORD: password
+        DB_NAME: time_tracking_app
+      continue-on-error: true
+    
+    - name: Send test results to Slack
+      if: always()
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_SECRET }}
+      run: |
+        TEST_OUTPUT=$(cat test-output.log 2>/dev/null | head -100)
+        STATUS="${{ job.status }}"
+        EMOJI=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
+        TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        
+        # Escape newlines and quotes for JSON
+        TEST_OUTPUT_JSON=$(echo "$TEST_OUTPUT" | jq -Rs .)
+        
+        PAYLOAD=$(cat <<EOF
+        {
+          "text": "${EMOJI} Test Results: ${STATUS}",
+          "blocks": [
+            {
+              "type": "header",
+              "text": {
+                "type": "plain_text",
+                "text": "${EMOJI} Tests: ${STATUS^^}",
+                "emoji": true
+              }
+            },
+            {
+              "type": "section",
+              "fields": [
+                {
+                  "type": "mrkdwn",
+                  "text": "*Repository:*\n${{ github.repository }}"
+                },
+                {
+                  "type": "mrkdwn",
+                  "text": "*Branch:*\n${{ github.ref_name }}"
+                },
+                {
+                  "type": "mrkdwn",
+                  "text": "*Workflow:*\n${{ github.workflow }}"
+                },
+                {
+                  "type": "mrkdwn",
+                  "text": "*Time:*\n${TIMESTAMP}"
+                }
+              ]
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "*Test Output:*\n\`\`\`\n${TEST_OUTPUT:0:2000}\n\`\`\`"
+              }
+            },
+            {
+              "type": "actions",
+              "elements": [
+                {
+                  "type": "button",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "View Details"
+                  },
+                  "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                }
+              ]
+            }
+          ]
+        }
+        EOF
+        )
+        
+        echo "Sending Slack notification..."
+        curl -s -X POST -H 'Content-type: application/json' --data "${PAYLOAD}" "${{ secrets.SLACK_SECRET }}"
+    
+    - name: Exit with test status
+      if: steps.test.outcome == 'failure'
+      run: exit 1
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Build Docker image
+      run: docker build -t ${{ github.repository }}:${{ github.sha }} .
+    
+    - name: Docker build success notification
+      if: success()
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_SECRET }}
+      run: |
+        TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        PAYLOAD=$(cat <<EOF
+        {
+          "text": "✅ Docker Build: success",
+          "blocks": [
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "✅ *Docker Build Successful*\n\nRepository: ${{ github.repository }}\nImage: ${{ github.repository }}:${{ github.sha }}\nTime: ${TIMESTAMP}"
+              }
+            }
+          ]
+        }
+        EOF
+        )
+        curl -s -X POST -H 'Content-type: application/json' --data "${PAYLOAD}" "${{ secrets.SLACK_SECRET }}"
