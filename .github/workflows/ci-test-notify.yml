@@ -1,10 +1,10 @@
-name: CI Test Pipeline with Notifications
+name: CI/CD Pipeline
 
 on:
   push:
     branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
 
 jobs:
   test:
@@ -41,66 +41,23 @@ jobs:
         DB_PASSWORD: password
         DB_NAME: time_tracking_app
       continue-on-error: true
-
-    - name: Capture test results
-      id: capture
-      if: always()
-      run: |
-        STATUS="${{ job.status }}"
-        echo "test_status=$STATUS" >> $GITHUB_OUTPUT
-        SUMMARY=$(head -n 50 test-output.txt || echo "No test output")
-        echo "test_summary<<EOF" >> $GITHUB_OUTPUT
-        echo "$SUMMARY" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-
+    
     - name: Send test results to Slack
       if: always() && secrets.SLACK_SECRET != ''
       env:
         SLACK_WEBHOOK: ${{ secrets.SLACK_SECRET }}
+        TEST_STATUS: ${{ job.status }}
       run: |
         EMOJI="✅"
-        STATUS="${{ job.status }}"
-        if [ "$STATUS" != "success" ]; then EMOJI="❌"; fi
+        if [ "$TEST_STATUS" != "success" ]; then EMOJI="❌"; fi
         
-        PAYLOAD=$(cat <<'PAYLOAD_END'
-        {
-          "text": "${{ job.status }} - Tests in ${{ github.repository }}",
-          "blocks": [
-            {
-              "type": "section",
-              "text": {
-                "type": "mrkdwn",
-                "text": "$EMOJI *Tests $STATUS*\n\n*Repository:* ${{ github.repository }}\n*Branch:* ${{ github.ref_name }}\n*Commit:* ${{ github.sha }}\n\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Full Results>"
-              }
-            }
-          ]
-        }
-        PAYLOAD_END
-        )
+        PAYLOAD="{\"text\":\"${EMOJI} Test ${TEST_STATUS}: ${{ github.repository }}\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"${EMOJI} *Tests ${TEST_STATUS}*\\n\\nRepository: ${{ github.repository }}\\nBranch: ${{ github.ref_name }}\\nCommit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\\n\\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Full Test Results>\"}}]}"
         
-        curl -s -X POST \
+        curl -X POST \
           -H 'Content-type: application/json' \
           --data "$PAYLOAD" \
           "$SLACK_WEBHOOK"
-
-    - name: Send email notification (fallback)
-      if: always() && secrets.SLACK_SECRET == '' && secrets.SMTP_HOST != ''
-      uses: dawidd6/action-send-mail@v3
-      with:
-        server_address: ${{ secrets.SMTP_HOST }}
-        server_port: ${{ secrets.SMTP_PORT }}
-        username: ${{ secrets.SMTP_USERNAME }}
-        password: ${{ secrets.SMTP_PASSWORD }}
-        subject: "[CI] Tests ${{ job.status }} - ${{ github.repository }}"
-        to: ${{ secrets.EMAIL_TO }}
-        from: ${{ secrets.EMAIL_FROM }}
-        body: |
-          Tests status: ${{ job.status }}
-          Repository: ${{ github.repository }}
-          Branch: ${{ github.ref_name }}
-          Commit: ${{ github.sha }}
-          View run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
+    
     - name: Fail if tests failed
       if: steps.test.outcome == 'failure'
       run: exit 1
@@ -121,3 +78,13 @@ jobs:
         sleep 10
         curl -f http://localhost:3000/health || exit 1
         docker stop test-container
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Deploy to staging
+      run: |
+        echo "Deploying to staging environment..."
