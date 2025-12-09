@@ -127,9 +127,9 @@ jobs:
   slack-notify:
     needs: [unit-tests, integration-tests, docker-test]
     runs-on: ubuntu-latest
-    if: secrets.SLACK_SECRET != ''
     steps:
       - name: Send Slack Notification
+        if: ${{ secrets.SLACK_SECRET }}  # ✅ moved to step-level
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_SECRET }}
         run: |
