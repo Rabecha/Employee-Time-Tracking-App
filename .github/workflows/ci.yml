@@ -123,19 +123,7 @@ jobs:
       - name: Deploy to Staging
         run: echo "Deploying to staging environment..."
 
-  # 9. Notify Slack
-  slack-notify:
-    needs: [unit-tests, integration-tests, docker-test]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Send Slack Notification
-        if: ${{ secrets.SLACK_SECRET }}  # ✅ moved to step-level
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_SECRET }}
-        run: |
-          STATUS="✅ All jobs passed"
-          PAYLOAD="{\"text\":\"${STATUS} - CI/CD Pipeline\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"${STATUS}\\nRepository: ${{ github.repository }}\\nBranch: ${{ github.ref_name }}\\nCommit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\"}}]}"
-          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK"
+
 
   # 10. Deploy to Production
   deploy-production:
