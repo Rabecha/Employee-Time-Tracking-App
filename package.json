@@ -1,6 +1,6 @@
 {
   "name": "notes-app",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Simple Notes App with DevOps pipeline",
   "main": "index.js",
   "scripts": {
@@ -30,11 +30,4 @@
   ],
   "author": "DevOps Student",
   "license": "MIT"
-}
-{
-  "name": "notes-app",
-  "version": "1.0.0",
-  "scripts": {
-    "start": "node index.js"
-  }
 }
