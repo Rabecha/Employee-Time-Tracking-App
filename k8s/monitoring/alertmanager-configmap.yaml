@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: default
+data:
+  alertmanager.yml: |
+    global: {}
+    route:
+      receiver: github-dispatch
+    receivers:
+      - name: github-dispatch
+        webhook_configs:
+          - url: 'https://api.github.com/repos/<OWNER>/<REPO>/dispatches'
+            http_config:
+              # Replace with a secure token in production and store it outside this manifest
+              bearer_token: '<GITHUB_TOKEN_PLACEHOLDER>'
+            send_resolved: true
+
+# Notes:
+# - Alertmanager's webhook will POST the alert payload to the GitHub Repository Dispatch API endpoint.
+# - For security, configure Alertmanager with a token that has limited permissions and keep it out of this file (use a secret store).
+# - The Alertmanager -> GitHub approach expects the webhook body to be converted into the proper GitHub dispatch payload. In practice you may instead use a small relay service (or an Alertmanager webhook receiver template) that transforms alerts into the JSON expected by GitHub's repository dispatch API: { "event_type": "monitoring_alert", "client_payload": { ... } }.

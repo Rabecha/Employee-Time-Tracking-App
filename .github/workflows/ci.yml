@@ -4,12 +4,26 @@ on:
   push:
     branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
 
 jobs:
-  test:
+  # 1. Linting Job
+  lint:
     runs-on: ubuntu-latest
-    
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run ESLint
+        run: npm run lint
+
+  # 2. Unit Tests
+  unit-tests:
+    runs-on: ubuntu-latest
     services:
       mysql:
         image: mysql:8.0
@@ -19,72 +33,90 @@ jobs:
         ports:
           - 3306:3306
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
-
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-    
-    - name: Install dependencies
-      run: npm ci
-    
-    - name: Run tests
-      id: test
-      run: npm test 2>&1 | tee test-output.txt
-      env:
-        DB_HOST: localhost
-        DB_USER: root
-        DB_PASSWORD: password
-        DB_NAME: time_tracking_app
-      continue-on-error: true
-    
-    - name: Send test results to Slack
-      if: always() && secrets.SLACK_SECRET != ''
-      env:
-        SLACK_WEBHOOK: ${{ secrets.SLACK_SECRET }}
-        TEST_STATUS: ${{ job.status }}
-      run: |
-        EMOJI="✅"
-        if [ "$TEST_STATUS" != "success" ]; then EMOJI="❌"; fi
-        
-        PAYLOAD="{\"text\":\"${EMOJI} Test ${TEST_STATUS}: ${{ github.repository }}\",\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"${EMOJI} *Tests ${TEST_STATUS}*\\n\\nRepository: ${{ github.repository }}\\nBranch: ${{ github.ref_name }}\\nCommit: <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\\n\\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Full Test Results>\"}}]}"
-        
-        curl -X POST \
-          -H 'Content-type: application/json' \
-          --data "$PAYLOAD" \
-          "$SLACK_WEBHOOK"
-    
-    - name: Fail if tests failed
-      if: steps.test.outcome == 'failure'
-      run: exit 1
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run Unit Tests
+        run: npm test
+        env:
+          DB_HOST: localhost
+          DB_USER: root
+          DB_PASSWORD: password
+          DB_NAME: time_tracking_app
 
-  build:
-    needs: test
+  # 3. Integration Tests
+  integration-tests:
+    needs: unit-tests
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Build Docker image
-      run: docker build -t notes-app:${{ github.sha }} .
-    
-    - name: Test Docker image
-      run: |
-        docker run -d --name test-container -p 3000:3000 notes-app:${{ github.sha }}
-        sleep 10
-        curl -f http://localhost:3000/health || exit 1
-        docker stop test-container
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run Integration Tests
+        run: npm run test:integration
 
-  deploy:
-    needs: build
+  # 4. Security Scan
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run Security Scan
+        run: npm audit --audit-level=high
+
+  
+
+  # 6. Build Docker Image
+  docker-build:
+    needs: [lint, unit-tests, integration-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t notes-app:${{ github.sha }} .
+
+  # 7. Test Docker Image
+  docker-test:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test Docker image
+        run: |
+          docker run -d --name test-container -p 3000:3000 notes-app:${{ github.sha }}
+          sleep 10
+          curl -f http://localhost:3000/health || exit 1
+          docker stop test-container
+
+  # 8. Deploy to Staging
+  deploy-staging:
+    needs: docker-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Staging
+        run: echo "Deploying to staging environment..."
+
+
+
+  # 10. Deploy to Production
+  deploy-production:
+    needs: deploy-staging
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    
     steps:
-    - name: Deploy to staging
-      run: |
-        echo "Deploying to staging environment..."
+      - name: Deploy to Production
+        run: echo "Deploying to production environment..."

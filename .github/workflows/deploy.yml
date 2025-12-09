@@ -1,0 +1,53 @@
+name: CD Deploy to Kubernetes
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+    - name: Set up Kubeconfig
+      run: |
+        echo "$KUBE_CONFIG_DATA" | base64 --decode > kubeconfig
+      env:
+        KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+    - name: Deploy MySQL
+      run: |
+        kubectl --kubeconfig=kubeconfig apply -f k8s/mysql-deployment.yaml
+        kubectl --kubeconfig=kubeconfig apply -f k8s/mysql-service.yaml
+
+    - name: Deploy new green version
+      run: |
+        # Copy deployment.yaml to deployment-green.yaml and update names/labels
+        sed 's/name: notes-app/name: notes-app-green/g; s/app: notes-app/app: notes-app-green/g' k8s/deployment.yaml > k8s/deployment-green.yaml
+        kubectl --kubeconfig=kubeconfig apply -f k8s/deployment-green.yaml
+
+    - name: Switch service to green
+      run: |
+        # Copy service.yaml to service-green.yaml and update selector
+        sed 's/app: notes-app/app: notes-app-green/g' k8s/service.yaml > k8s/service-green.yaml
+        kubectl --kubeconfig=kubeconfig apply -f k8s/service-green.yaml
+
+    - name: Deploy Ingress (optional)
+      run: |
+        kubectl --kubeconfig=kubeconfig apply -f k8s/ingress.yaml
+      continue-on-error: true
+
+    - name: Verify green rollout
+      run: |
+        kubectl --kubeconfig=kubeconfig rollout status deployment/notes-app-green
+        kubectl --kubeconfig=kubeconfig rollout status deployment/mysql
+
+    - name: Cleanup blue deployment
+      run: |
+        kubectl --kubeconfig=kubeconfig delete deployment notes-app || true

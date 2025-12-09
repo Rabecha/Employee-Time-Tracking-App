@@ -31,13 +31,13 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
-    `);
+    `);// eslint-disable-next-line no-console
     console.log('Database connected and timesheets table created');
-  } catch (error) {
+  } catch (error) {// eslint-disable-next-line no-console
     console.error('Database connection failed:', error);
     // Don't exit the process here so the app can still start for development purposes.
     // Set `db` to null so routes can respond accordingly.
-    db = null;
+    db = null;// eslint-disable-next-line no-console
     console.warn('Continuing without database. Routes that require the database will return 503.');
   }
 }
@@ -53,7 +53,7 @@ app.get('/api/timesheets', async (req, res) => {
   try {
     const [rows] = await db.execute('SELECT * FROM timesheets ORDER BY created_at DESC');
     res.json(rows);
-  } catch (error) {
+  } catch (error) {// eslint-disable-next-line no-console
     console.error('Error fetching time entries:', error);
     res.status(500).json({ error: 'Failed to fetch time entries' });
   }
@@ -80,7 +80,7 @@ app.post('/api/timesheets', async (req, res) => {
       check_out_time,
       message: 'Time entry logged successfully' 
     });
-  } catch (error) {
+  } catch (error) {// eslint-disable-next-line no-console
     console.error('Error creating time entry:', error);
     res.status(500).json({ error: 'Failed to create time entry' });
   }
@@ -107,7 +107,7 @@ app.put('/api/timesheets/:id', async (req, res) => {
     }
     
     res.json({ message: 'Time entry updated successfully' });
-  } catch (error) {
+  } catch (error) {// eslint-disable-next-line no-console
     console.error('Error updating time entry:', error);
     res.status(500).json({ error: 'Failed to update time entry' });
   }
@@ -126,7 +126,7 @@ app.delete('/api/timesheets/:id', async (req, res) => {
     }
     
     res.json({ message: 'Time entry deleted successfully' });
-  } catch (error) {
+  } catch (error) {// eslint-disable-next-line no-console
     console.error('Error deleting time entry:', error);
     res.status(500).json({ error: 'Failed to delete time entry' });
   }
@@ -141,7 +141,7 @@ const PORT = process.env.PORT || 3000;
 
 async function startServer() {
   await initDB();
-  app.listen(PORT, () => {
+  app.listen(PORT, () => {// eslint-disable-next-line no-console
     console.log(`Server running on port ${PORT}`);
   });
 }
