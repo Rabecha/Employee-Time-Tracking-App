@@ -1,3 +1,4 @@
+
 # Release Management Guide
 
 This guide explains how to manage releases, versioning, and Docker image publishing for the Notes App.
